@@ -1,46 +1,45 @@
-import { md5, stringToUtf8Bytes, utf8BytesToString, bytesToBase64, base64ToBytes } from "./codec-util.js";
+import { md5, stringToUtf8Bytes, utf8BytesToString, bytesToBase64, base64ToBytes, invSubBytes, subWord, keyExpansion, invShiftRows } from "./codec-util.js";
+
+function normalizePositiveTimestamp(value, fallbackValue = Date.now()) {
+  const ts = Number(value);
+  return Number.isFinite(ts) && ts > 0 ? Math.trunc(ts) : Math.trunc(Number(fallbackValue) || Date.now());
+}
+
+function encodeBase64UrlText(text = "") {
+    return bytesToBase64(stringToUtf8Bytes(text))
+        .replace(/\+/g, "-")
+        .replace(/\//g, "_")
+        .replace(/=+$/g, "");
+}
+
+function decodeBase64UrlText(text = "") {
+    const normalized = String(text || "").trim();
+    if (!normalized) return "";
+    const base64 = normalized
+        .replace(/-/g, "+")
+        .replace(/_/g, "/")
+        .padEnd(Math.ceil(normalized.length / 4) * 4, "=");
+    return utf8BytesToString(base64ToBytes(base64));
+}
 
 // 移动端参数
-const HANJUTV_VERSION = "6.5.3";
-const HANJUTV_VC = "a_7980";
-const HANJUTV_UA = "HanjuTV/6.5.3 (Pixel 2 XL; Android 11; Scale/2.00)";
-const HANJUTV_UK_KEY = "f349wghhe784tqwh";
-const HANJUTV_UK_IV = "d3w8hf94fidk38lk";
-const HANJUTV_RESPONSE_SECRET = "34F9Q53w/HJW8E6Q";
+const HANJUTV_VERSION = "6.8.2";
+const HANJUTV_VC = "a_8280";
+const HANJUTV_CH = "xiaomi";
+const HANJUTV_MODEL = "Redmi Note 12";
+const HANJUTV_MAKER = "Xiaomi";
+const HANJUTV_OSV = "14";
+const HANJUTV_UA = `HanjuTV/${HANJUTV_VERSION} (${HANJUTV_MODEL}; Android ${HANJUTV_OSV}; Scale/2.00)`;
+const HANJUTV_INSTALL_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 const UID_CHARSET = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 
-// TV版本参数
+// 共享加密参数
 const UK_KEY = "f349wghhe784tqwh";
 const UK_IV = "d3w8hf94fidk38lk";
 const RESPONSE_SECRET = "34F9Q53w/HJW8E6Q";
+
+// TV版本参数
 const SAID = "fb3597b87601d5a7";
-
-const SBOX = [
-  0x63, 0x7c, 0x77, 0x7b, 0xf2, 0x6b, 0x6f, 0xc5, 0x30, 0x01, 0x67, 0x2b, 0xfe, 0xd7, 0xab, 0x76,
-  0xca, 0x82, 0xc9, 0x7d, 0xfa, 0x59, 0x47, 0xf0, 0xad, 0xd4, 0xa2, 0xaf, 0x9c, 0xa4, 0x72, 0xc0,
-  0xb7, 0xfd, 0x93, 0x26, 0x36, 0x3f, 0xf7, 0xcc, 0x34, 0xa5, 0xe5, 0xf1, 0x71, 0xd8, 0x31, 0x15,
-  0x04, 0xc7, 0x23, 0xc3, 0x18, 0x96, 0x05, 0x9a, 0x07, 0x12, 0x80, 0xe2, 0xeb, 0x27, 0xb2, 0x75,
-  0x09, 0x83, 0x2c, 0x1a, 0x1b, 0x6e, 0x5a, 0xa0, 0x52, 0x3b, 0xd6, 0xb3, 0x29, 0xe3, 0x2f, 0x84,
-  0x53, 0xd1, 0x00, 0xed, 0x20, 0xfc, 0xb1, 0x5b, 0x6a, 0xcb, 0xbe, 0x39, 0x4a, 0x4c, 0x58, 0xcf,
-  0xd0, 0xef, 0xaa, 0xfb, 0x43, 0x4d, 0x33, 0x85, 0x45, 0xf9, 0x02, 0x7f, 0x50, 0x3c, 0x9f, 0xa8,
-  0x51, 0xa3, 0x40, 0x8f, 0x92, 0x9d, 0x38, 0xf5, 0xbc, 0xb6, 0xda, 0x21, 0x10, 0xff, 0xf3, 0xd2,
-  0xcd, 0x0c, 0x13, 0xec, 0x5f, 0x97, 0x44, 0x17, 0xc4, 0xa7, 0x7e, 0x3d, 0x64, 0x5d, 0x19, 0x73,
-  0x60, 0x81, 0x4f, 0xdc, 0x22, 0x2a, 0x90, 0x88, 0x46, 0xee, 0xb8, 0x14, 0xde, 0x5e, 0x0b, 0xdb,
-  0xe0, 0x32, 0x3a, 0x0a, 0x49, 0x06, 0x24, 0x5c, 0xc2, 0xd3, 0xac, 0x62, 0x91, 0x95, 0xe4, 0x79,
-  0xe7, 0xc8, 0x37, 0x6d, 0x8d, 0xd5, 0x4e, 0xa9, 0x6c, 0x56, 0xf4, 0xea, 0x65, 0x7a, 0xae, 0x08,
-  0xba, 0x78, 0x25, 0x2e, 0x1c, 0xa6, 0xb4, 0xc6, 0xe8, 0xdd, 0x74, 0x1f, 0x4b, 0xbd, 0x8b, 0x8a,
-  0x70, 0x3e, 0xb5, 0x66, 0x48, 0x03, 0xf6, 0x0e, 0x61, 0x35, 0x57, 0xb9, 0x86, 0xc1, 0x1d, 0x9e,
-  0xe1, 0xf8, 0x98, 0x11, 0x69, 0xd9, 0x8e, 0x94, 0x9b, 0x1e, 0x87, 0xe9, 0xce, 0x55, 0x28, 0xdf,
-  0x8c, 0xa1, 0x89, 0x0d, 0xbf, 0xe6, 0x42, 0x68, 0x41, 0x99, 0x2d, 0x0f, 0xb0, 0x54, 0xbb, 0x16,
-];
-
-const INV_SBOX = (() => {
-  const table = new Uint8Array(256);
-  for (let i = 0; i < 256; i++) table[SBOX[i]] = i;
-  return table;
-})();
-
-const RCON = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36];
 
 function utf8Encode(text) {
   if (typeof TextEncoder !== "undefined") return new TextEncoder().encode(text);
@@ -71,35 +70,6 @@ function stripControlChars(text) {
   return text.replace(/[\u0000-\u001f\u007f-\u009f]/g, "");
 }
 
-function rotWord(word) {
-  return Uint8Array.from([word[1], word[2], word[3], word[0]]);
-}
-
-function subWord(word) {
-  return Uint8Array.from(word.map((b) => SBOX[b]));
-}
-
-function keyExpansion(key) {
-  const Nk = 4;
-  const Nb = 4;
-  const Nr = 10;
-  const w = new Array(Nb * (Nr + 1));
-
-  for (let i = 0; i < Nk; i++) {
-    w[i] = key.slice(4 * i, 4 * i + 4);
-  }
-
-  for (let i = Nk; i < Nb * (Nr + 1); i++) {
-    let temp = w[i - 1];
-    if (i % Nk === 0) {
-      temp = xorBytes(subWord(rotWord(temp)), Uint8Array.from([RCON[i / Nk], 0, 0, 0]));
-    }
-    w[i] = xorBytes(w[i - Nk], temp);
-  }
-
-  return w;
-}
-
 function addRoundKey(state, w, round) {
   const out = new Uint8Array(16);
   for (let c = 0; c < 4; c++) {
@@ -110,29 +80,11 @@ function addRoundKey(state, w, round) {
   return out;
 }
 
-function subBytes(state) {
-  return Uint8Array.from(state.map((b) => SBOX[b]));
-}
-
-function invSubBytes(state) {
-  return Uint8Array.from(state.map((b) => INV_SBOX[b]));
-}
-
 function shiftRows(state) {
   const out = new Uint8Array(16);
   for (let r = 0; r < 4; r++) {
     for (let c = 0; c < 4; c++) {
       out[r + 4 * c] = state[r + 4 * ((c + r) % 4)];
-    }
-  }
-  return out;
-}
-
-function invShiftRows(state) {
-  const out = new Uint8Array(16);
-  for (let r = 0; r < 4; r++) {
-    for (let c = 0; c < 4; c++) {
-      out[r + 4 * c] = state[r + 4 * ((c - r + 4) % 4)];
     }
   }
   return out;
@@ -181,13 +133,13 @@ function aesEncryptBlock(input, w) {
   state = addRoundKey(state, w, 0);
 
   for (let round = 1; round <= 9; round++) {
-    state = subBytes(state);
+    state = subWord(state);
     state = shiftRows(state);
     state = mixColumns(state);
     state = addRoundKey(state, w, round);
   }
 
-  state = subBytes(state);
+  state = subWord(state);
   state = shiftRows(state);
   state = addRoundKey(state, w, 10);
   return state;
@@ -271,41 +223,6 @@ function randomInt(max) {
   return Math.floor(Math.random() * max);
 }
 
-function buildSearchSignPayload(uid, timestamp) {
-  return JSON.stringify({
-    emu: 0,
-    ou: 0,
-    it: timestamp,
-    iit: timestamp,
-    bs: 0,
-    uid,
-    pc: 0,
-    tm: 0,
-    d8m: "0,0,0,0,0,0,0,0",
-    md: "Pixel 2 XL",
-    maker: "Google",
-    osv: "11",
-    br: 100,
-    rpc: 0,
-    scc: 0,
-    plc: 0,
-    toc: 1,
-    tsc: 0,
-    ts: timestamp,
-    pa: 1,
-    nw: 2,
-    px: "0",
-    isp: "",
-    ai: "ccffc2520864efdb",
-    oa: "",
-    dpc: 0,
-    dsc: 0,
-    qpc: 0,
-    apad: 0,
-    pk: "com.babycloud.hanju",
-  });
-}
-
 export function createHanjutvUid(length = 20) {
   let uid = "";
   for (let i = 0; i < length; i++) uid += UID_CHARSET[randomInt(UID_CHARSET.length)];
@@ -314,30 +231,49 @@ export function createHanjutvUid(length = 20) {
 
 function randomFrom(chars, len) {
   let s = "";
-  for (let i = 0; i < len; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  for (let i = 0; i < len; i++) s += chars[randomInt(chars.length)];
   return s;
 }
 
-// 移动端headers
-export async function createHanjutvSearchHeaders(uid, timestamp = Date.now()) {
-  const ts = Number(timestamp);
-  const uidMd5 = md5(uid);
-  const signPayload = buildSearchSignPayload(uid, ts);
-  const sign = await aesCbcEncryptToBase64(signPayload, uidMd5.slice(0, 16), uidMd5.slice(16, 32));
-  const uk = await aesCbcEncryptToBase64(uid, HANJUTV_UK_KEY, HANJUTV_UK_IV);
-
+function createSearchContext(uid, sessionInitTs = Date.now()) {
+  const initTs = normalizePositiveTimestamp(sessionInitTs);
   return {
-    app: "hj",
-    ch: "qq",
-    uk,
-    "auth-uid": "",
-    vn: HANJUTV_VERSION,
-    sign,
-    "User-Agent": HANJUTV_UA,
-    vc: HANJUTV_VC,
-    "auth-token": "",
-    "Accept-Encoding": "gzip",
-    Connection: "Keep-Alive",
+    uid: uid || createHanjutvUid(),
+    said: randomFrom("0123456789abcdef", 16),
+    oa: randomFrom("0123456789abcdef", 16),
+    installTs: Math.max(0, initTs - HANJUTV_INSTALL_AGE_MS),
+  };
+}
+
+function buildSearchSignPayload(context, timestamp) {
+  const ts = normalizePositiveTimestamp(timestamp, context.installTs + HANJUTV_INSTALL_AGE_MS);
+  return JSON.stringify({ emu: 0, ou: 0, it: context.installTs, iit: context.installTs, bs: 0, uid: context.uid, pc: 0, tm: 81, d8m: "0,0,0,0,0,0,0,4", md: HANJUTV_MODEL, maker: HANJUTV_MAKER, osv: HANJUTV_OSV, br: 95, rpc: 0, scc: 2, plc: 6, toc: 19, tsc: 10, ts, pa: 1, crec: 0, nw: 2, px: "0", isp: "", ai: context.said, oa: context.oa, dpc: 0, dsc: 0, qpc: 0, apad: 0, pk: "com.babycloud.hanju" });
+}
+
+export async function buildHanjutvSearchHeaders(sessionInitTs = Date.now(), uid = createHanjutvUid()) {
+  const searchContext = createSearchContext(uid, sessionInitTs);
+  const uidMd5 = md5(searchContext.uid);
+  const uk = await aesCbcEncryptToBase64(searchContext.uid, UK_KEY, UK_IV);
+
+  return async function makeHeaders(reqTs = Date.now()) {
+    const signPayload = buildSearchSignPayload(searchContext, reqTs);
+    const sign = await aesCbcEncryptToBase64(signPayload, uidMd5.slice(0, 16), uidMd5.slice(16, 32));
+
+    return {
+      uid: searchContext.uid,
+      headers: {
+        app: "hj",
+        ch: HANJUTV_CH,
+        said: searchContext.said,
+        uk,
+        vn: HANJUTV_VERSION,
+        sign,
+        "User-Agent": HANJUTV_UA,
+        vc: HANJUTV_VC,
+        "Accept-Encoding": "gzip",
+        Connection: "Keep-Alive",
+      },
+    };
   };
 }
 
@@ -387,10 +323,109 @@ export async function decodeHanjutvEncryptedPayload(payload, uid = "") {
   if (!key && uid && ts !== "") key = md5(`${uid}${ts}`);
   if (!key) throw new Error("缺少解密 key，且无法通过 uid+ts 推导");
 
-  const mix = md5(`${key}${HANJUTV_RESPONSE_SECRET}`);
+  const mix = md5(`${key}${RESPONSE_SECRET}`);
   const aesKey = mix.slice(0, 16);
   const iv = mix.slice(16, 32);
   const plainText = await aesCbcDecryptBase64NoPadding(payload.data, aesKey, iv);
   const cleanedText = stripControlChars(plainText).trim();
   return JSON.parse(cleanedText);
+}
+
+function normalizeHanjutvEpisodeIdText(rawId = "") {
+  const idText = String(rawId || "").trim();
+  return idText.startsWith("hanjutv:") ? idText.slice("hanjutv:".length) : idText;
+}
+
+function buildHanjutvEpisodeRef(id = "", preferTv = false) {
+  const cleanId = String(id || "").trim();
+  if (!cleanId) return null;
+
+  return {
+    id: cleanId,
+    preferTv,
+    rawId: `${preferTv ? "tv" : "hxq"}:${cleanId}`,
+  };
+}
+
+function decodeMergedHanjutvEpisodeId(normalizedId = "") {
+  if (!normalizedId.startsWith("merge:")) return null;
+
+  try {
+    const payloadText = decodeBase64UrlText(normalizedId.slice("merge:".length));
+    const payload = JSON.parse(payloadText);
+    const hxqId = String(payload?.hxq || "").trim();
+    const tvId = String(payload?.tv || "").trim();
+
+    if (!hxqId || !tvId) return null;
+    return { hxqId, tvId };
+  } catch (_) {
+    return null;
+  }
+}
+
+export function encodeMergedHanjutvEpisodeDanmuId(hxqId = "", tvId = "") {
+  const cleanHxqId = String(hxqId || "").trim();
+  const cleanTvId = String(tvId || "").trim();
+  if (!cleanHxqId || !cleanTvId) return "";
+
+  return `merge:${encodeBase64UrlText(JSON.stringify({
+    hxq: cleanHxqId,
+    tv: cleanTvId,
+  }))}`;
+}
+
+export function parseHanjutvEpisodeDanmuId(rawId = "") {
+  const normalizedId = normalizeHanjutvEpisodeIdText(rawId);
+  if (!normalizedId) {
+    return { id: "", preferTv: false, rawId: "", refs: [] };
+  }
+
+  const mergedIds = decodeMergedHanjutvEpisodeId(normalizedId);
+  if (mergedIds) {
+    const refs = [
+      buildHanjutvEpisodeRef(mergedIds.hxqId, false),
+      buildHanjutvEpisodeRef(mergedIds.tvId, true),
+    ].filter(Boolean);
+
+    return {
+      id: refs[0]?.id || "",
+      preferTv: false,
+      rawId: normalizedId,
+      refs,
+    };
+  }
+
+  if (normalizedId.startsWith("tv:")) {
+    const ref = buildHanjutvEpisodeRef(normalizedId.slice(3), true);
+    return {
+      id: ref?.id || "",
+      preferTv: true,
+      rawId: ref?.rawId || "",
+      refs: ref ? [ref] : [],
+    };
+  }
+
+  if (normalizedId.startsWith("hxq:")) {
+    const ref = buildHanjutvEpisodeRef(normalizedId.slice(4), false);
+    return {
+      id: ref?.id || "",
+      preferTv: false,
+      rawId: ref?.rawId || "",
+      refs: ref ? [ref] : [],
+    };
+  }
+
+  const ref = buildHanjutvEpisodeRef(normalizedId, false);
+  return {
+    id: ref?.id || "",
+    preferTv: false,
+    rawId: ref?.rawId || "",
+    refs: ref ? [ref] : [],
+  };
+}
+
+export function getHanjutvSourceLabel(rawId = "") {
+  const normalizedId = normalizeHanjutvEpisodeIdText(rawId);
+  if (normalizedId.startsWith("merge:")) return "韩小圈＆极速版";
+  return normalizedId.startsWith("tv:") ? "极速版" : "韩小圈";
 }
